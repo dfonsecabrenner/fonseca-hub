@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Fonseca Hub</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;650;700&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>html,body{margin:0;background:#E9EDF2}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useMemo, useEffect } = React;
+
+const THEMES = {
+  marino: {
+    nombre: "Marino",
+    ground: "#E9EDF2", card: "#FFFFFF", ink: "#16283D", mute: "#63748A",
+    line: "#D8E0E8", red: "#C0392B", amber: "#C97F1B", teal: "#1B7A6E",
+    green: "#2F7D4F", chrome: "#16283D", chromeInk: "#F2F6FA", chromeMute: "#8FA6BD",
+  },
+  nocturno: {
+    nombre: "Nocturno",
+    ground: "#0F1519", card: "#19232A", ink: "#E9EFF2", mute: "#8496A0",
+    line: "#273540", red: "#E8695C", amber: "#E7A93B", teal: "#46B3A4",
+    green: "#56B36B", chrome: "#080C0F", chromeInk: "#E9EFF2", chromeMute: "#7D8F99",
+  },
+  arcilla: {
+    nombre: "Arcilla",
+    ground: "#F4F0EA", card: "#FFFDF9", ink: "#2C2723", mute: "#7B7168",
+    line: "#E4DCD2", red: "#A93B2C", amber: "#C0741E", teal: "#46705F",
+    green: "#4E7A47", chrome: "#2C2723", chromeInk: "#F7F3ED", chromeMute: "#A0958A",
+  },
+};
+
+let C = THEMES.marino;
+
+// Colores de marca — todos confirmados contra las guías existentes.
+const MODULES = [
+  { k: "pendientes", l: "Pendientes", ini: "P", interno: true },
+  { k: "proyectos", l: "Proyectos", ini: "Pr", interno: true },
+  { k: "inmuebles", l: "Inmuebles", ini: "In", c: "#1A3C6E", fuente: "Navy Fonseca Immobilien" },
+  { k: "lupa", l: "LUPA", ini: "L", c: "#C97B2A", url: "lupa.vercel.app", fuente: "Ámbar Lupa" },
+  { k: "danicare", l: "DaniCare", ini: "D", c: "#7B5EA7", url: "danicare.app", fuente: "Purple DaniCare" },
+  { k: "web", l: "Fonseca Reporting", ini: "FR", c: "#49652E", url: "fonsecareporting.de", fuente: "Verde oscuro FCR" },
+  { k: "mise", l: "MISE", ini: "M", c: "#E8943A", url: "mise-app-iota-five.vercel.app", fuente: "Naranja MISE sobre oscuro" },
+  { k: "live", l: "Financial LIVE", ini: "FL", c: "#8CAD4E", url: "financial-live-portal.vercel.app", fuente: "Verde principal FCR" },
+];
+
+
+
+const PRIO = {
+  urgent: { l: "URG", c: "red" },
+  high: { l: "ALT", c: "amber" },
+  medium: { l: "MED", c: "teal" },
+  low: { l: "BAJ", c: "mute" },
+};
+
+const hrs = (m) => (m / 60 >= 10 ? Math.round(m / 60) : (m / 60).toFixed(1));
+const fmt = (d) =>
+  d.toLocaleDateString("es-ES", { day: "2-digit", month: "short" }).replace(".", "");
+
+function Hub({ tasks: TASKS, proyectos: PROYECTOS, hoy: HOY }) {
+  const [tema, setTema] = useState("arcilla");
+  C = THEMES[tema];
+  const [tab, setTab] = useState("home");
+  const [filtro, setFiltro] = useState("vencidas");
+  const [cliente, setCliente] = useState("TODOS");
+  const [hechas, setHechas] = useState(() => new Set());
+
+  const toggle = (id) =>
+    setHechas((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+
+  const vivas = TASKS.filter((t) => !hechas.has(t.id));
+  const vencidas = vivas.filter((t) => t.dias < 0);
+  const hoy = vivas.filter((t) => t.dias === 0);
+  const semana = vivas.filter((t) => t.dias > 0 && t.dias <= 7);
+
+  const clientes = useMemo(() => {
+    const m = {};
+    vivas.forEach((t) => (m[t.cli] = (m[t.cli] || 0) + 1));
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  }, [hechas]);
+
+  const lista = useMemo(() => {
+    let l = vivas;
+    if (filtro === "vencidas") l = vencidas;
+    if (filtro === "hoy") l = hoy;
+    if (filtro === "semana") l = semana;
+    if (filtro === "sincli") l = l.filter((t) => t.cli === "—");
+    if (cliente !== "TODOS") l = l.filter((t) => t.cli === cliente);
+    return l.sort((a, b) => a.d - b.d);
+  }, [filtro, cliente, hechas]);
+
+  // Carga por día, próximos 14
+  const carga = useMemo(() => {
+    const out = [];
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(HOY.getTime() + i * 86400000);
+      const key = d.toISOString().slice(0, 10);
+      const m = vivas.filter((t) => t.date === key).reduce((s, t) => s + t.min, 0);
+      out.push({ d, key, m });
+    }
+    return out;
+  }, [hechas]);
+
+  const maxCarga = Math.max(...carga.map((c) => c.m), 60);
+  const deudaMin = vencidas.reduce((s, t) => s + t.min, 0);
+
+  const grupos = useMemo(() => {
+    const g = {};
+    lista.forEach((t) => {
+      const k =
+        t.dias < 0 ? "Vencidas" : t.dias === 0 ? "Hoy" : fmt(t.d);
+      (g[k] = g[k] || []).push(t);
+    });
+    return Object.entries(g);
+  }, [lista]);
+
+  return (
+    <div style={{ background: C.ground, minHeight: "100vh", color: C.ink }}>
+      <style>{`
+        *{box-sizing:border-box;margin:0}
+        .hub{font-family:'Inter',-apple-system,'Segoe UI',system-ui,sans-serif;
+             max-width:560px;margin:0 auto;padding-bottom:40px}
+        .mono{font-family:ui-monospace,'SF Mono',Menlo,monospace;
+              font-variant-numeric:tabular-nums}
+        .nav{display:flex;gap:2px;overflow-x:auto;padding:10px 12px 0;
+             scrollbar-width:none}
+        .nav::-webkit-scrollbar{display:none}
+        .navb{border:0;background:transparent;padding:8px 12px;font-size:13px;
+              font-weight:600;color:${C.mute};cursor:pointer;white-space:nowrap;
+              border-bottom:2px solid transparent;letter-spacing:-.01em}
+        .navb.on{color:${C.ink};border-bottom-color:${C.ink}}
+        .wrap{padding:0 12px}
+        .card{background:${C.card};border:1px solid ${C.line};border-radius:3px}
+        .chip{border:1px solid ${C.line};background:${C.card};border-radius:2px;
+              padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;
+              color:${C.mute};white-space:nowrap}
+        .chip.on{background:${C.ink};color:${C.card};border-color:${C.ink}}
+        .tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+        .tile{background:${C.card};border:1px solid ${C.line};border-radius:6px;
+              padding:12px;text-align:left;cursor:pointer;position:relative;
+              display:flex;flex-direction:column;width:100%;min-height:112px}
+        .tile:hover{border-color:${C.mute}}
+        .tile.wide{grid-column:1 / -1;min-height:0}
+        .ficha{width:26px;height:26px;border-radius:6px;display:flex;
+               align-items:center;justify-content:center;color:#fff;font-weight:700;
+               font-size:11px;letter-spacing:-.02em;flex:none}
+        .tname{font-size:13px;font-weight:650;letter-spacing:-.015em;margin-top:9px}
+        .tsub{font-size:11.5px;color:${C.mute};line-height:1.35;margin-top:3px}
+        .tfoot{font-size:9.5px;color:${C.mute};margin-top:auto;padding-top:8px;
+               overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .dot{width:7px;height:7px;border-radius:50%;flex:none}
+        .warn{font-size:9px;border:1px dashed ${C.mute};color:${C.mute};
+              border-radius:3px;padding:0 4px;font-weight:600}
+        .big{font-size:29px;font-weight:700;letter-spacing:-.045em;line-height:1}
+        .themebtn{width:18px;height:18px;border-radius:50%;border:1.5px solid ${C.chromeMute};
+                  cursor:pointer;padding:0}
+        .themebtn.on{border-color:${C.chromeInk};box-shadow:0 0 0 2px ${C.chrome}, 0 0 0 3.5px ${C.chromeInk}}
+        .row{display:flex;gap:10px;align-items:flex-start;padding:11px 12px;
+             border-bottom:1px solid ${C.line};cursor:pointer}
+        .row:last-child{border-bottom:0}
+        .row:hover{background:${C.ground}}
+        .tick{width:15px;height:15px;border:1.5px solid ${C.line};border-radius:2px;
+              flex:none;margin-top:1px;background:${C.card}}
+        .eyebrow{font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+                 color:${C.mute};font-weight:700}
+        .scroll{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;
+                padding-bottom:2px}
+        .scroll::-webkit-scrollbar{display:none}
+        button:focus-visible{outline:2px solid ${C.teal};outline-offset:2px}
+      `}</style>
+
+      <div className="hub">
+        {/* Cabecera */}
+        <div style={{ background: C.chrome, padding: "15px 12px 14px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div className="eyebrow" style={{ color: C.chromeMute }}>
+                {HOY.toLocaleDateString("es-ES",{weekday:"long",day:"2-digit",month:"short",year:"numeric"})}
+              </div>
+              <div
+                style={{
+                  fontSize: 22,
+                  fontWeight: 700,
+                  letterSpacing: "-.035em",
+                  marginTop: 3,
+                  color: C.chromeInk,
+                }}
+              >
+                Fonseca Hub
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 7, paddingTop: 4 }}>
+              {Object.entries(THEMES).map(([k, t]) => (
+                <button
+                  key={k}
+                  title={t.nombre}
+                  aria-label={`Tema ${t.nombre}`}
+                  className={`themebtn${tema === k ? " on" : ""}`}
+                  style={{ background: t.ground }}
+                  onClick={() => setTema(k)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Navegación */}
+        <div style={{ background: C.card, borderBottom: `1px solid ${C.line}` }}>
+          <div className="nav">
+            {[["home", "Home"], ...MODULES.map((m) => [m.k, m.url ? m.l + " ↗" : m.l])].map(
+              ([k, l]) => (
+                <button
+                  key={k}
+                  className={`navb${tab === k ? " on" : ""}`}
+                  onClick={() => setTab(k)}
+                >
+                  {l}
+                </button>
+              )
+            )}
+          </div>
+        </div>
+
+        {tab === "home" ? (
+          <div className="wrap" style={{ paddingTop: 12 }}>
+            <div className="tiles">
+              {MODULES.map((m) => {
+                const D = {
+                  pendientes: ["rojo", String(vencidas.length), `vencidas · ${hrs(deudaMin)} h de deuda`],
+                  proyectos: ["rojo", String(PROYECTOS.filter(p=>p[2]==="rojo").length), "bloqueados de "+PROYECTOS.length],
+                  inmuebles: ["ambar", "7", "propiedades · 3 sin datos"],
+                  lupa: ["ambar", "€17.878", "sin categorizar"],
+                  danicare: ["rojo", "0", "envíos a la App Store"],
+                  web: ["ambar", "Wix", "DNS sin migrar"],
+                  mise: ["rojo", "2", "bugs bloquean el uso"],
+                  live: ["ambar", "0", "clientes piloto definidos"],
+                }[m.k];
+                const dot = D[0] === "rojo" ? C.red : D[0] === "ambar" ? C.amber : C.green;
+                const fondo = m.interno ? C.ink : m.c;
+                return (
+                  <button
+                    key={m.k}
+                    className={`tile${m.k === "pendientes" ? " wide" : ""}`}
+                    onClick={() => setTab(m.k)}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className="ficha" style={{ background: fondo }}>
+                        {m.ini}
+                      </span>
+                      <span className="dot" style={{ background: dot, marginLeft: "auto" }} />
+                    </div>
+                    <div className="tname">{m.l}</div>
+                    <div
+                      className="big mono"
+                      style={{
+                        marginTop: 7,
+                        fontSize: D[1].length > 4 ? 20 : 29,
+                        color: D[0] === "rojo" ? C.red : C.ink,
+                      }}
+                    >
+                      {D[1]}
+                    </div>
+                    <div className="tsub">{D[2]}</div>
+
+                    {m.k === "pendientes" && (
+                      <div style={{ display: "flex", gap: 2, alignItems: "flex-end", height: 24, marginTop: 10 }}>
+                        {carga.map((c, i) => (
+                          <div
+                            key={c.key}
+                            style={{
+                              flex: 1,
+                              height: Math.max(2, (c.m / maxCarga) * 24),
+                              background: i === 0 ? C.amber : C.ink,
+                              opacity: i === 0 ? 1 : 0.35,
+                              borderRadius: 1,
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="tfoot">{m.url ? `${m.url} ↗` : m.fuente || "vista interna"}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <p style={{ fontSize: 10.5, color: C.mute, marginTop: 14, lineHeight: 1.5 }}>
+              Datos en vivo de tu Supabase. No escribe en la base.
+              Los tres círculos de arriba cambian el tema.
+            </p>
+          </div>
+        ) : tab === "proyectos" ? (
+          <div className="wrap" style={{ paddingTop: 12 }}>
+            {["rojo", "ambar", "verde"].map((st) => {
+              const items = PROYECTOS.filter((p) => p[2] === st);
+              const col = st === "rojo" ? C.red : st === "ambar" ? C.amber : C.green;
+              return (
+                <div key={st} style={{ marginBottom: 12 }}>
+                  <div className="eyebrow" style={{ color: col, padding: "0 2px 5px" }}>
+                    {st === "rojo" ? "Bloqueados" : st === "ambar" ? "En curso" : "Sanos"}
+                  </div>
+                  <div className="card">
+                    {items.map((p) => (
+                      <div key={p[0]} className="row" style={{ cursor: "default" }}>
+                        <span
+                          style={{
+                            width: 7,
+                            height: 7,
+                            borderRadius: "50%",
+                            background: col,
+                            flex: "none",
+                            marginTop: 5,
+                          }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="mono" style={{ fontSize: 12, fontWeight: 700 }}>
+                            {p[0]}
+                          </div>
+                          <div style={{ fontSize: 12.5, color: C.mute, marginTop: 2, lineHeight: 1.35 }}>
+                            {p[3]}
+                          </div>
+                        </div>
+                        <span className="mono" style={{ fontSize: 9.5, color: C.mute, flex: "none" }}>
+                          {p[1]}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            <p style={{ fontSize: 10.5, color: C.mute, lineHeight: 1.5 }}>
+              {PROYECTOS.length} proyectos de la bitácora. Sin fases todavía: eso necesita la tabla
+              nueva que dejamos en pausa.
+            </p>
+          </div>
+        ) : tab !== "pendientes" ? (
+          <div className="wrap" style={{ paddingTop: 40, textAlign: "center", color: C.mute }}>
+            <div className="eyebrow">Aún no construido</div>
+            <p style={{ fontSize: 14, marginTop: 8, lineHeight: 1.5 }}>
+              Aquí iría la vista embebida o el enlace directo.
+            </p>
+            <button className="chip" style={{ marginTop: 14 }} onClick={() => setTab("home")}>
+              Volver al Home
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Carga: la deuda vencida contra los próximos 14 días */}
+            <div className="wrap" style={{ paddingTop: 14 }}>
+              <div className="card" style={{ padding: "12px 12px 10px" }}>
+                <div className="eyebrow">Carga de trabajo</div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 8, marginTop: 10, height: 74 }}>
+                  {/* bloque de deuda */}
+                  <div style={{ flex: "none", width: 62, textAlign: "center" }}>
+                    <div
+                      style={{
+                        height: 58,
+                        background: C.red,
+                        borderRadius: 2,
+                        color: "#fff",
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <div className="mono" style={{ fontSize: 17, fontWeight: 700, lineHeight: 1 }}>
+                        {hrs(deudaMin)}h
+                      </div>
+                      <div style={{ fontSize: 9, opacity: 0.85, marginTop: 2 }}>
+                        {vencidas.length} atrasadas
+                      </div>
+                    </div>
+                    <div className="eyebrow" style={{ marginTop: 4, fontSize: 9 }}>
+                      Deuda
+                    </div>
+                  </div>
+
+                  <div style={{ width: 1, height: 62, background: C.line, flex: "none" }} />
+
+                  {/* próximos 14 días */}
+                  <div style={{ display: "flex", gap: 3, alignItems: "flex-end", flex: 1, height: 74 }}>
+                    {carga.map((c, i) => {
+                      const wknd = c.d.getDay() === 0 || c.d.getDay() === 6;
+                      return (
+                        <div key={c.key} style={{ flex: 1, textAlign: "center" }}>
+                          <div
+                            title={`${hrs(c.m)}h`}
+                            style={{
+                              height: Math.max(2, (c.m / maxCarga) * 58),
+                              background: i === 0 ? C.amber : wknd ? C.line : C.teal,
+                              borderRadius: 1,
+                            }}
+                          />
+                          <div
+                            className="mono"
+                            style={{ fontSize: 8, color: C.mute, marginTop: 4 }}
+                          >
+                            {c.d.getDate()}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: C.mute, marginTop: 8, lineHeight: 1.45 }}>
+                  Llevas <b style={{ color: C.red }}>{hrs(deudaMin)} horas</b> de trabajo vencido
+                  encima de una agenda que ya tiene {hrs(carga.reduce((s, c) => s + c.m, 0))} h en 14 días.
+                </div>
+              </div>
+            </div>
+
+            {/* Filtros */}
+            <div className="wrap" style={{ paddingTop: 12 }}>
+              <div className="scroll">
+                {[
+                  ["vencidas", `Vencidas ${vencidas.length}`],
+                  ["hoy", `Hoy ${hoy.length}`],
+                  ["semana", `7 días ${semana.length}`],
+                  ["sincli", "Sin cliente"],
+                  ["todo", `Todo ${vivas.length}`],
+                ].map(([k, l]) => (
+                  <button
+                    key={k}
+                    className={`chip${filtro === k ? " on" : ""}`}
+                    onClick={() => setFiltro(k)}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <div className="scroll" style={{ marginTop: 6 }}>
+                <button
+                  className={`chip${cliente === "TODOS" ? " on" : ""}`}
+                  onClick={() => setCliente("TODOS")}
+                >
+                  Todos
+                </button>
+                {clientes.map(([c, n]) => (
+                  <button
+                    key={c}
+                    className={`chip mono${cliente === c ? " on" : ""}`}
+                    onClick={() => setCliente(c)}
+                  >
+                    {c === "—" ? "s/c" : c} {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Lista */}
+            <div className="wrap" style={{ paddingTop: 12 }}>
+              {grupos.length === 0 && (
+                <div className="card" style={{ padding: 24, textAlign: "center", color: C.mute, fontSize: 13 }}>
+                  Nada aquí. Cambia el filtro o elige otro cliente.
+                </div>
+              )}
+              {grupos.map(([titulo, items]) => (
+                <div key={titulo} style={{ marginBottom: 12 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "baseline",
+                      padding: "0 2px 5px",
+                    }}
+                  >
+                    <span
+                      className="eyebrow"
+                      style={{ color: titulo === "Vencidas" ? C.red : C.mute }}
+                    >
+                      {titulo}
+                    </span>
+                    <span className="mono" style={{ fontSize: 10, color: C.mute }}>
+                      {items.length} · {hrs(items.reduce((s, t) => s + t.min, 0))}h
+                    </span>
+                  </div>
+                  <div className="card">
+                    {items.map((t) => (
+                      <div key={t.id} className="row" onClick={() => toggle(t.id)}>
+                        <div className="tick" />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13.5, lineHeight: 1.35, letterSpacing: "-.01em" }}>
+                            {t.title}
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              alignItems: "center",
+                              marginTop: 4,
+                            }}
+                          >
+                            <span
+                              className="mono"
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 700,
+                                color: C[PRIO[t.prio].c],
+                                border: `1px solid ${C[PRIO[t.prio].c]}`,
+                                borderRadius: 2,
+                                padding: "0 3px",
+                              }}
+                            >
+                              {PRIO[t.prio].l}
+                            </span>
+                            {t.cli !== "—" && (
+                              <span className="mono" style={{ fontSize: 10, fontWeight: 700 }}>
+                                {t.cli}
+                              </span>
+                            )}
+                            <span className="mono" style={{ fontSize: 10, color: C.mute }}>
+                              {fmt(t.d)}
+                            </span>
+                            <span className="mono" style={{ fontSize: 10, color: C.mute }}>
+                              {t.min}′
+                            </span>
+                            {t.dias < 0 && (
+                              <span
+                                className="mono"
+                                style={{ fontSize: 10, color: C.red, fontWeight: 700 }}
+                              >
+                                +{Math.abs(t.dias)}d
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {hechas.size > 0 && (
+                <div
+                  className="card"
+                  style={{
+                    padding: "10px 12px",
+                    fontSize: 12,
+                    color: C.mute,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>
+                    <b style={{ color: C.green }}>{hechas.size}</b> marcadas (solo en esta vista)
+                  </span>
+                  <button className="chip" onClick={() => setHechas(new Set())}>
+                    Deshacer
+                  </button>
+                </div>
+              )}
+
+              <p style={{ fontSize: 10.5, color: C.mute, marginTop: 14, lineHeight: 1.5 }}>
+                Datos en vivo de tu Supabase. No escribe en la base.
+              </p>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+
+function HubApp(){
+  const URL="https://rvldlwkujmxwdgqhoafq.supabase.co";
+  const KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2bGRsd2t1am14d2RncWhvYWZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3MzMxNDYsImV4cCI6MjA5MDMwOTE0Nn0.9YIUe9Xkd6JyRPrMkTsKFl_W5yuqD2ctbJtoz-ZirAY";
+  const sb = useMemo(()=>window.supabase.createClient(URL,KEY),[]);
+  const [ready,setReady]=useState(false);
+  const [session,setSession]=useState(null);
+  const [data,setData]=useState(null);
+  const [err,setErr]=useState("");
+  const [email,setEmail]=useState(""); const [pw,setPw]=useState(""); const [busy,setBusy]=useState(false);
+
+  useEffect(()=>{
+    sb.auth.getSession().then(({data})=>{ setSession(data.session); setReady(true); });
+    const {data:sub}=sb.auth.onAuthStateChange((_e,s)=>setSession(s));
+    return ()=>sub.subscription.unsubscribe();
+  },[]);
+
+  useEffect(()=>{
+    if(!session){ setData(null); return; }
+    (async()=>{
+      try{
+        const HOY=new Date(); HOY.setHours(0,0,0,0);
+        const [tR,cR,pR]=await Promise.all([
+          sb.from("tasks").select("title,due_date,priority,duration_minutes,client_id").eq("status","pending"),
+          sb.from("clients").select("id,code"),
+          sb.from("bitacora_tablero").select("project,dominio,status,summary"),
+        ]);
+        if(tR.error) throw tR.error; if(cR.error) throw cR.error; if(pR.error) throw pR.error;
+        const codeById={}; (cR.data||[]).forEach(c=>codeById[c.id]=c.code);
+        const tasks=(tR.data||[]).filter(t=>t.due_date).map((t,i)=>{
+          const d=new Date(t.due_date+"T00:00:00");
+          return {id:i, cli:t.client_id?(codeById[t.client_id]||"—"):"—", title:t.title,
+                  date:t.due_date, d, dias:Math.round((d-HOY)/86400000),
+                  prio:t.priority||"medium", min:t.duration_minutes||0};
+        });
+        const proyectos=(pR.data||[]).map(p=>[p.project,p.dominio,p.status,p.summary||""]);
+        setData({tasks,proyectos,hoy:HOY});
+      }catch(ex){ setErr(ex.message||String(ex)); }
+    })();
+  },[session]);
+
+  const login=async(e)=>{ e.preventDefault(); setBusy(true); setErr("");
+    const {error}=await sb.auth.signInWithPassword({email:email.trim(),password:pw});
+    if(error) setErr(error.message); setBusy(false); };
+  const logout=async()=>{ await sb.auth.signOut(); setData(null); setErr(""); };
+
+  const shell=(inner)=>React.createElement("div",{style:{minHeight:"100vh",background:"#E9EDF2",
+    display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,-apple-system,system-ui,sans-serif",padding:20}},inner);
+
+  if(!ready) return shell("");
+  if(!session){
+    return shell(
+      <form onSubmit={login} style={{background:"#fff",border:"1px solid #D8E0E8",borderRadius:10,
+        padding:28,width:320,boxShadow:"0 20px 50px -30px rgba(22,40,61,.5)"}}>
+        <div style={{fontSize:20,fontWeight:700,color:"#16283D",letterSpacing:"-.03em"}}>Fonseca Hub</div>
+        <div style={{fontSize:12.5,color:"#63748A",marginTop:4,marginBottom:18}}>Inicia sesión para ver tus datos en vivo.</div>
+        <input value={email} onChange={e=>setEmail(e.target.value)} type="email" placeholder="Email" autoComplete="username"
+          style={{width:"100%",padding:"11px 12px",border:"1.5px solid #D8E0E8",borderRadius:7,fontSize:14,marginBottom:9}}/>
+        <input value={pw} onChange={e=>setPw(e.target.value)} type="password" placeholder="Contraseña" autoComplete="current-password"
+          style={{width:"100%",padding:"11px 12px",border:"1.5px solid #D8E0E8",borderRadius:7,fontSize:14,marginBottom:14}}/>
+        <button type="submit" disabled={busy} style={{width:"100%",padding:"11px",border:0,borderRadius:7,
+          background:"#16283D",color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer",opacity:busy?.6:1}}>
+          {busy?"Entrando…":"Entrar"}</button>
+        {err&&<div style={{color:"#C0392B",fontSize:12.5,marginTop:12}}>{err}</div>}
+      </form>);
+  }
+  if(err) return shell(
+    <div style={{textAlign:"center",color:"#63748A",maxWidth:340}}>
+      <div style={{color:"#C0392B",fontWeight:600,fontSize:15}}>No se pudieron cargar los datos</div>
+      <div style={{fontSize:12.5,marginTop:8,wordBreak:"break-word"}}>{err}</div>
+      <button onClick={logout} style={{marginTop:16,padding:"9px 16px",border:"1px solid #D8E0E8",
+        borderRadius:7,background:"#fff",cursor:"pointer",fontSize:13}}>Cerrar sesión</button>
+    </div>);
+  if(!data) return shell(<div style={{color:"#63748A",fontSize:14}}>Cargando datos en vivo…</div>);
+  return <Hub tasks={data.tasks} proyectos={data.proyectos} hoy={data.hoy}/>;
+}
+
+
+ReactDOM.createRoot(document.getElementById("root")).render(<HubApp/>);
+</script>
+</body>
+</html>
